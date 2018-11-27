@@ -16,11 +16,12 @@ package exporter
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
+
 	"github.com/fstab/grok_exporter/config/v2"
 	"github.com/fstab/grok_exporter/oniguruma"
 	"github.com/fstab/grok_exporter/template"
-	"regexp"
-	"strings"
 )
 
 // Compile a grok pattern string into a regular expression.
@@ -36,21 +37,21 @@ func Compile(pattern string, patterns *Patterns) (*oniguruma.Regex, error) {
 	return result, nil
 }
 
-func VerifyFieldNames(m *v2.MetricConfig, regex, deleteRegex *oniguruma.Regex) error {
+func VerifyFieldNames(metric string, m *v2.MetricMatch, regex, deleteRegex *oniguruma.Regex) error {
 	for _, template := range m.LabelTemplates {
-		err := verifyFieldName(m.Name, template, regex)
+		err := verifyFieldName(metric, template, regex)
 		if err != nil {
 			return err
 		}
 	}
 	for _, template := range m.DeleteLabelTemplates {
-		err := verifyFieldName(m.Name, template, deleteRegex)
+		err := verifyFieldName(metric, template, deleteRegex)
 		if err != nil {
 			return err
 		}
 	}
 	if m.ValueTemplate != nil {
-		err := verifyFieldName(m.Name, m.ValueTemplate, regex)
+		err := verifyFieldName(metric, m.ValueTemplate, regex)
 		if err != nil {
 			return err
 		}

@@ -16,6 +16,7 @@ package v1
 
 import (
 	"fmt"
+
 	"github.com/fstab/grok_exporter/config/v2"
 	"gopkg.in/yaml.v2"
 )
@@ -45,21 +46,25 @@ func convertMetrics(v1metrics []MetricConfig) []v2.MetricConfig {
 	}
 	v2metrics := make([]v2.MetricConfig, len(v1metrics))
 	for i, v1metric := range v1metrics {
+
+		mm := v2.MetricMatch{
+			Match: v1metric.Match,
+			Value: makeTemplate(v1metric.Value),
+		}
+		if len(v1metric.Labels) > 0 {
+			mm.Labels = make(map[string]string, len(v1metric.Labels))
+			for _, v1label := range v1metric.Labels {
+				mm.Labels[v1label.PrometheusLabel] = makeTemplate(v1label.GrokFieldName)
+			}
+		}
 		v2metrics[i] = v2.MetricConfig{
 			Type:       v1metric.Type,
 			Name:       v1metric.Name,
 			Help:       v1metric.Help,
-			Match:      v1metric.Match,
-			Value:      makeTemplate(v1metric.Value),
+			Matchs:     []v2.MetricMatch{mm},
 			Cumulative: v1metric.Cumulative,
 			Buckets:    v1metric.Buckets,
 			Quantiles:  v1metric.Quantiles,
-		}
-		if len(v1metric.Labels) > 0 {
-			v2metrics[i].Labels = make(map[string]string, len(v1metric.Labels))
-			for _, v1label := range v1metric.Labels {
-				v2metrics[i].Labels[v1label.PrometheusLabel] = makeTemplate(v1label.GrokFieldName)
-			}
 		}
 	}
 	return v2metrics

@@ -17,15 +17,16 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
+	"os"
+	"time"
+
 	"github.com/fstab/grok_exporter/config"
 	"github.com/fstab/grok_exporter/config/v2"
 	"github.com/fstab/grok_exporter/exporter"
 	"github.com/fstab/grok_exporter/oniguruma"
 	"github.com/fstab/grok_exporter/tailer"
 	"github.com/prometheus/client_golang/prometheus"
-	"net/http"
-	"os"
-	"time"
 )
 
 var (
@@ -175,32 +176,46 @@ func createMetrics(cfg *v2.Config, patterns *exporter.Patterns) ([]exporter.Metr
 	result := make([]exporter.Metric, 0, len(cfg.Metrics))
 	for _, m := range cfg.Metrics {
 		var (
-			regex, deleteRegex *oniguruma.Regex
-			err                error
+			regexs       = make(map[string]*oniguruma.Regex)
+			deleteRegexs = make(map[string]*oniguruma.Regex)
+			err          error
 		)
-		regex, err = exporter.Compile(m.Match, patterns)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize metric %v: %v", m.Name, err.Error())
-		}
-		if len(m.DeleteMatch) > 0 {
-			deleteRegex, err = exporter.Compile(m.DeleteMatch, patterns)
+
+		for _, mm := range m.Matchs {
+			var (
+				regex, deleteRegex *oniguruma.Regex
+			)
+			regex, err = exporter.Compile(mm.Match, patterns)
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize metric %v: %v", m.Name, err.Error())
 			}
+			if len(mm.DeleteMatch) > 0 {
+				deleteRegex, err = exporter.Compile(mm.DeleteMatch, patterns)
+				if err != nil {
+					return nil, fmt.Errorf("failed to initialize metric %v: %v", m.Name, err.Error())
+				}
+			}
+			err = exporter.VerifyFieldNames(m.Name, &mm, regex, deleteRegex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize metric %v: %v", m.Name, err.Error())
+			}
+			regexs[mm.Match] = regex
+
+			if deleteRegex != nil {
+				deleteRegexs[mm.Match] = deleteRegex
+
+			}
 		}
-		err = exporter.VerifyFieldNames(&m, regex, deleteRegex)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize metric %v: %v", m.Name, err.Error())
-		}
+
 		switch m.Type {
 		case "counter":
-			result = append(result, exporter.NewCounterMetric(&m, regex, deleteRegex))
+			result = append(result, exporter.NewCounterMetric(&m, regexs, deleteRegexs))
 		case "gauge":
-			result = append(result, exporter.NewGaugeMetric(&m, regex, deleteRegex))
+			result = append(result, exporter.NewGaugeMetric(&m, regexs, deleteRegexs))
 		case "histogram":
-			result = append(result, exporter.NewHistogramMetric(&m, regex, deleteRegex))
+			result = append(result, exporter.NewHistogramMetric(&m, regexs, deleteRegexs))
 		case "summary":
-			result = append(result, exporter.NewSummaryMetric(&m, regex, deleteRegex))
+			result = append(result, exporter.NewSummaryMetric(&m, regexs, deleteRegexs))
 		default:
 			return nil, fmt.Errorf("Failed to initialize metrics: Metric type %v is not supported.", m.Type)
 		}

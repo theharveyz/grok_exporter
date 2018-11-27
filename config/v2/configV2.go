@@ -16,11 +16,12 @@ package v2
 
 import (
 	"fmt"
-	"github.com/fstab/grok_exporter/template"
-	"gopkg.in/yaml.v2"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fstab/grok_exporter/template"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -71,21 +72,26 @@ type GrokConfig struct {
 }
 
 type MetricConfig struct {
-	Type                 string              `yaml:",omitempty"`
-	Name                 string              `yaml:",omitempty"`
-	Help                 string              `yaml:",omitempty"`
+	Type       string              `yaml:",omitempty"`
+	Name       string              `yaml:",omitempty"`
+	Help       string              `yaml:",omitempty"`
+	Retention  time.Duration       `yaml:",omitempty"` // implicitly parsed with time.ParseDuration()
+	Cumulative bool                `yaml:",omitempty"`
+	Quantiles  map[float64]float64 `yaml:",flow,omitempty"`
+	Buckets    []float64           `yaml:",flow,omitempty"`
+	Matchs     []MetricMatch       `yaml:",omitempty"`
+}
+
+type MetricMatch struct {
 	Match                string              `yaml:",omitempty"`
-	Retention            time.Duration       `yaml:",omitempty"` // implicitly parsed with time.ParseDuration()
 	Value                string              `yaml:",omitempty"`
-	Cumulative           bool                `yaml:",omitempty"`
-	Buckets              []float64           `yaml:",flow,omitempty"`
-	Quantiles            map[float64]float64 `yaml:",flow,omitempty"`
 	Labels               map[string]string   `yaml:",omitempty"`
 	LabelTemplates       []template.Template `yaml:"-"` // parsed version of Labels, will not be serialized to yaml.
 	ValueTemplate        template.Template   `yaml:"-"` // parsed version of Value, will not be serialized to yaml.
 	DeleteMatch          string              `yaml:"delete_match,omitempty"`
 	DeleteLabels         map[string]string   `yaml:"delete_labels,omitempty"` // TODO: Make sure that DeleteMatch is not nil if DeleteLabels are used.
 	DeleteLabelTemplates []template.Template `yaml:"-"`                       // parsed version of DeleteLabels, will not be serialized to yaml.
+
 }
 
 type MetricsConfig []MetricConfig
@@ -234,8 +240,6 @@ func (c *MetricConfig) validate() error {
 		return fmt.Errorf("Invalid metric configuration: 'metrics.name' must not be empty.")
 	case c.Help == "":
 		return fmt.Errorf("Invalid metric configuration: 'metrics.help' must not be empty.")
-	case c.Match == "":
-		return fmt.Errorf("Invalid metric configuration: 'metrics.match' must not be empty.")
 	}
 	var hasValue, cumulativeAllowed, bucketsAllowed, quantilesAllowed bool
 	switch c.Type {
@@ -251,10 +255,6 @@ func (c *MetricConfig) validate() error {
 		return fmt.Errorf("Invalid 'metrics.type': '%v'. We currently only support 'counter' and 'gauge'.", c.Type)
 	}
 	switch {
-	case hasValue && len(c.Value) == 0:
-		return fmt.Errorf("Invalid metric configuration: 'metrics.value' must not be empty for %v metrics.", c.Type)
-	case !hasValue && len(c.Value) > 0:
-		return fmt.Errorf("Invalid metric configuration: 'metrics.value' cannot be used for %v metrics.", c.Type)
 	case !cumulativeAllowed && c.Cumulative:
 		return fmt.Errorf("Invalid metric configuration: 'metrics.cumulative' cannot be used for %v metrics.", c.Type)
 	case !bucketsAllowed && len(c.Buckets) > 0:
@@ -262,27 +262,40 @@ func (c *MetricConfig) validate() error {
 	case !quantilesAllowed && len(c.Quantiles) > 0:
 		return fmt.Errorf("Invalid metric configuration: 'metrics.buckets' cannot be used for %v metrics.", c.Type)
 	}
-	if len(c.DeleteMatch) > 0 && len(c.Labels) == 0 {
-		return fmt.Errorf("Invalid metric configuration: 'metrics.delete_match' is only supported for metrics with labels.")
-	}
-	if len(c.DeleteMatch) == 0 && len(c.DeleteLabelTemplates) > 0 {
-		return fmt.Errorf("Invalid metric configuration: 'metrics.delete_labels' can only be used when 'metrics.delete_match' is present.")
-	}
-	if c.Retention > 0 && len(c.Labels) == 0 {
-		return fmt.Errorf("Invalid metric configuration: 'metrics.retention' is only supported for metrics with labels.")
-	}
-	for _, deleteLabelTemplate := range c.DeleteLabelTemplates {
-		found := false
-		for _, labelTemplate := range c.LabelTemplates {
-			if deleteLabelTemplate.Name() == labelTemplate.Name() {
-				found = true
-				break
+
+	for _, match := range c.Matchs {
+		switch {
+		case match.Match == "":
+			return fmt.Errorf("Invalid metric configuration: 'metrics.match' must not be empty.")
+		case hasValue && len(match.Value) == 0:
+			return fmt.Errorf("Invalid metric configuration: 'metrics.value' must not be empty for %v metrics.", c.Type)
+		case !hasValue && len(match.Value) > 0:
+			return fmt.Errorf("Invalid metric configuration: 'metrics.value' cannot be used for %v metrics.", c.Type)
+		}
+
+		if len(match.DeleteMatch) > 0 && len(match.Labels) == 0 {
+			return fmt.Errorf("Invalid metric configuration: 'metrics.delete_match' is only supported for metrics with labels.")
+		}
+		if len(match.DeleteMatch) == 0 && len(match.DeleteLabelTemplates) > 0 {
+			return fmt.Errorf("Invalid metric configuration: 'metrics.delete_labels' can only be used when 'metrics.delete_match' is present.")
+		}
+		if c.Retention > 0 && len(match.Labels) == 0 {
+			return fmt.Errorf("Invalid metric configuration: 'metrics.retention' is only supported for metrics with labels.")
+		}
+		for _, deleteLabelTemplate := range match.DeleteLabelTemplates {
+			found := false
+			for _, labelTemplate := range match.LabelTemplates {
+				if deleteLabelTemplate.Name() == labelTemplate.Name() {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("Invalid metric configuration: '%v' cannot be used as a delete_label, because the metric does not have a label named '%v'.", deleteLabelTemplate.Name(), deleteLabelTemplate.Name())
 			}
 		}
-		if !found {
-			return fmt.Errorf("Invalid metric configuration: '%v' cannot be used as a delete_label, because the metric does not have a label named '%v'.", deleteLabelTemplate.Name(), deleteLabelTemplate.Name())
-		}
 	}
+
 	// InitTemplates() validates that labels/delete_labels/value are present as grok_fields in the grok pattern.
 	return nil
 }
@@ -331,32 +344,35 @@ func (metric *MetricConfig) InitTemplates() error {
 		msg   = "invalid configuration: failed to read metric %v: error parsing %v template: %v: " +
 			"don't forget to put a . (dot) in front of grok fields, otherwise it will be interpreted as a function."
 	)
-	for _, t := range []struct {
-		src  map[string]string    // label / template string as read from the config file
-		dest *[]template.Template // parsed template used internally in grok_exporter
-	}{
-		{
-			src:  metric.Labels,
-			dest: &(metric.LabelTemplates),
-		},
-		{
-			src:  metric.DeleteLabels,
-			dest: &(metric.DeleteLabelTemplates),
-		},
-	} {
-		*t.dest = make([]template.Template, 0, len(t.src))
-		for name, templateString := range t.src {
-			tmplt, err = template.New(name, templateString)
-			if err != nil {
-				return fmt.Errorf(msg, fmt.Sprintf("label %v", metric.Name), name, err.Error())
+	for index, match := range metric.Matchs {
+
+		for _, t := range []struct {
+			src  map[string]string    // label / template string as read from the config file
+			dest *[]template.Template // parsed template used internally in grok_exporter
+		}{
+			{
+				src:  match.Labels,
+				dest: &(match.LabelTemplates),
+			},
+			{
+				src:  match.DeleteLabels,
+				dest: &(match.DeleteLabelTemplates),
+			},
+		} {
+			*t.dest = make([]template.Template, 0, len(t.src))
+			for name, templateString := range t.src {
+				tmplt, err = template.New(name, templateString)
+				if err != nil {
+					return fmt.Errorf(msg, fmt.Sprintf("label %v", metric.Name), name, err.Error())
+				}
+				*t.dest = append(*t.dest, tmplt)
 			}
-			*t.dest = append(*t.dest, tmplt)
 		}
-	}
-	if len(metric.Value) > 0 {
-		metric.ValueTemplate, err = template.New("__value__", metric.Value)
-		if err != nil {
-			return fmt.Errorf(msg, "value", metric.Name, err.Error())
+		if len(match.Value) > 0 {
+			metric.Matchs[index].ValueTemplate, err = template.New("__value__", match.Value)
+			if err != nil {
+				return fmt.Errorf(msg, "value", metric.Name, err.Error())
+			}
 		}
 	}
 	return nil
