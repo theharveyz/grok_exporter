@@ -540,9 +540,7 @@ func NewSummaryMetric(cfg *configuration.MetricConfig, regexs, deleteRegexs map[
 
 func labelValues(metricName string, searchResult *oniguruma.SearchResult, templates []template.Template) (map[string]string, error) {
 	result := make(map[string]string, len(templates))
-	fmt.Println("labelValues:", metricName, templates)
 	for _, t := range templates {
-		fmt.Println("labelValues:", metricName, templates)
 
 		value, err := evalTemplate(searchResult, t)
 		if err != nil {
@@ -550,7 +548,6 @@ func labelValues(metricName string, searchResult *oniguruma.SearchResult, templa
 		}
 		result[t.Name()] = value
 	}
-	fmt.Println("labelValues:", result)
 
 	return result, nil
 }
@@ -593,7 +590,6 @@ func prometheusLabels(templates map[string][]template.Template) []string {
 			promLabels = append(promLabels, name)
 		}
 	}
-	fmt.Println("promLabels:", promLabels)
 
 	return promLabels
 }
