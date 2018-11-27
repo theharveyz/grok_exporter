@@ -352,11 +352,11 @@ func (metric *MetricConfig) InitTemplates() error {
 		}{
 			{
 				src:  match.Labels,
-				dest: &(match.LabelTemplates),
+				dest: &(metric.Matchs[index].LabelTemplates),
 			},
 			{
 				src:  match.DeleteLabels,
-				dest: &(match.DeleteLabelTemplates),
+				dest: &(metric.Matchs[index].DeleteLabelTemplates),
 			},
 		} {
 			*t.dest = make([]template.Template, 0, len(t.src))
