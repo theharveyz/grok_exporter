@@ -31,7 +31,10 @@ The exporter provides the metrics on [http://localhost:9144/metrics]:
 
 Configuration
 -------------
+#### 注意，本项目在原有配置格式的基础上，进行了二次修改，为了方便支持同一指标对应不同匹配方式的情况。
 
+##### 原有配置格式如下：
+------
 Example configuration:
 
 ```yaml
@@ -55,6 +58,45 @@ server:
 ```
 
 [CONFIG.md] describes the `grok_exporter` configuration file and shows how to define Grok patterns, Prometheus metrics, and labels.
+
+##### 修改后的格式如下：
+-----
+```yaml
+global:
+    config_version: 2
+input:
+    type: file
+    path: /your-log-path.log
+    readall: false
+    fail_on_missing_logfile: false
+grok:
+    patterns_dir: /your-grok-patterns-dir/
+    additional_patterns:
+    - 'ID XXXX[0-9]{4,}'
+metrics:
+    - type: gauge
+      name: your_metric
+      help: '订单信息'
+      cumulative: false
+      retention: 20s
+      matchs:
+        - match: '.*XXXXXX.*"%{XXXXX:id}".*'
+          value: 1
+          labels:
+            id: '{{. id}}'
+        - match: '.*BBBBBB.*"%{XXXXX:id}".*'
+          value: 1
+          labels:
+            id: '{{. id}}'
+
+```
+**新增`matchs`参数，并将如下参数，放到matchs每一项下，但是含义保持不变：**
+
+- value
+- lables
+- match
+
+**修改后，对于同一指标项，可以指定多种匹配规则。**
 
 Status
 ------
